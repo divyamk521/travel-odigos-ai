@@ -40,32 +40,47 @@ def generate_itinerary(data):
     }
 
 
-# 🔹 Chat Function with Memory
+# 🔹 Trim Memory Function
+def trim_memory(history):
+    limit = settings.MEMORY_LIMIT
+
+    if len(history) > limit:
+        return history[-limit:]  # keep last N messages
+
+    return history
+
+
+# 🔹 Chat Function with Memory Limit
 def chat_with_ai(session_id: str, message: str):
     if session_id not in chat_memory:
         chat_memory[session_id] = []
 
+    history = chat_memory[session_id]
+
     # Add user message
-    chat_memory[session_id].append({
-        "role": "user",
-        "content": message
-    })
+    history.append({"role": "user", "content": message})
+
+    # Trim before sending
+    history = trim_memory(history)
 
     response = client.chat.completions.create(
         model=settings.GROQ_MODEL,
         messages=[
             {"role": "system", "content": "You are a helpful travel assistant."},
-            *chat_memory[session_id]
+            *history
         ],
         temperature=0.7
     )
 
     reply = response.choices[0].message.content
 
-    # Store AI reply
-    chat_memory[session_id].append({
-        "role": "assistant",
-        "content": reply
-    })
+    # Add AI reply
+    history.append({"role": "assistant", "content": reply})
+
+    # Trim again after response
+    history = trim_memory(history)
+
+    # Save back
+    chat_memory[session_id] = history
 
     return reply
