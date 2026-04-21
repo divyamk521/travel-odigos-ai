@@ -1,6 +1,6 @@
 from fastapi import APIRouter
-from app.models.schemas import TravelRequest
-from app.services.ai_service import generate_itinerary
+from app.models.schemas import TravelRequest, ChatRequest
+from app.services.ai_service import generate_itinerary, chat_with_ai
 
 router = APIRouter()
 
@@ -10,7 +10,14 @@ def health():
     return {"status": "ok"}
 
 
+
 @router.post("/generate-itinerary")
 def create_itinerary(request: TravelRequest):
-    result = generate_itinerary(request)
-    return result
+    return generate_itinerary(request)
+
+
+
+@router.post("/chat")
+def chat(request: ChatRequest):
+    response = chat_with_ai(request.session_id, request.message)
+    return {"response": response}
