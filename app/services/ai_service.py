@@ -10,6 +10,16 @@ client = Groq(api_key=settings.GROQ_API_KEY)
 chat_memory = {}
 
 
+# 🔹 Trim Memory Function
+def trim_memory(history):
+    limit = settings.MEMORY_LIMIT
+
+    if len(history) > limit:
+        return history[-limit:]
+
+    return history
+
+
 # 🔹 Itinerary Generator
 def generate_itinerary(data):
     prompt = build_itinerary_prompt(data)
@@ -40,17 +50,7 @@ def generate_itinerary(data):
     }
 
 
-# 🔹 Trim Memory Function
-def trim_memory(history):
-    limit = settings.MEMORY_LIMIT
-
-    if len(history) > limit:
-        return history[-limit:]  # keep last N messages
-
-    return history
-
-
-# 🔹 Chat Function with Memory Limit
+# 🔹 Chat Function with Memory Limit + DEBUG
 def chat_with_ai(session_id: str, message: str):
     if session_id not in chat_memory:
         chat_memory[session_id] = []
@@ -58,10 +58,20 @@ def chat_with_ai(session_id: str, message: str):
     history = chat_memory[session_id]
 
     # Add user message
-    history.append({"role": "user", "content": message})
+    history.append({
+        "role": "user",
+        "content": message
+    })
 
-    # Trim before sending
+    # Trim BEFORE sending
     history = trim_memory(history)
+
+    # 🔍 DEBUG PRINT (important for testing)
+    print("\n========= MEMORY BEFORE AI =========")
+    print(f"Total Messages: {len(history)}")
+    for i, msg in enumerate(history):
+        print(f"{i+1}. {msg}")
+    print("====================================\n")
 
     response = client.chat.completions.create(
         model=settings.GROQ_MODEL,
@@ -74,13 +84,23 @@ def chat_with_ai(session_id: str, message: str):
 
     reply = response.choices[0].message.content
 
-    # Add AI reply
-    history.append({"role": "assistant", "content": reply})
+    # Add AI response
+    history.append({
+        "role": "assistant",
+        "content": reply
+    })
 
-    # Trim again after response
+    # Trim AFTER response
     history = trim_memory(history)
 
     # Save back
     chat_memory[session_id] = history
+
+    # 🔍 DEBUG PRINT AFTER RESPONSE
+    print("\n========= MEMORY AFTER AI =========")
+    print(f"Total Messages: {len(history)}")
+    for i, msg in enumerate(history):
+        print(f"{i+1}. {msg}")
+    print("===================================\n")
 
     return reply
