@@ -4,6 +4,7 @@ from app.services.ai_service import generate_itinerary
 
 router = APIRouter()
 
+
 @router.get("/health")
 def health():
     return {"status": "ok"}
