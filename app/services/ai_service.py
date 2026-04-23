@@ -3,26 +3,25 @@ from app.core.config import settings
 from app.prompts.itinerary_prompt import build_itinerary_prompt
 from app.utils.json_utils import extract_json
 from app.models.schemas import TravelResponse
+from app.services.intent_service import detect_intent
+from app.services.places_service import get_places
+from app.services.budget_service import estimate_budget
 
 client = Groq(api_key=settings.GROQ_API_KEY)
 
-# 🔹 In-memory chat storage
 chat_memory = {}
 
 
-# 🔹 Trim Memory Function
 def trim_memory(history):
     limit = settings.MEMORY_LIMIT
-
     if len(history) > limit:
         return history[-limit:]
-
     return history
 
 
-# 🔹 Itinerary Generator
 def generate_itinerary(data):
-    prompt = build_itinerary_prompt(data)
+    places = get_places(data.destination)
+    prompt = build_itinerary_prompt(data, places)
 
     for attempt in range(3):
         response = client.chat.completions.create(
@@ -44,34 +43,33 @@ def generate_itinerary(data):
             except Exception:
                 continue
 
-    return {
-        "error": "Failed to generate valid itinerary",
-        "raw_output": content
-    }
+    return {"error": "Failed to generate itinerary"}
 
 
-# 🔹 Chat Function with Memory Limit + DEBUG
 def chat_with_ai(session_id: str, message: str):
+    # 🔥 Detect intent
+    intent = detect_intent(message)
+
+    # 🔥 ROUTING LOGIC
+    if intent == "budget":
+        return estimate_budget("Goa", 3, "medium")
+
+    elif intent == "places":
+        return {"places": get_places("Goa")}
+
+    elif intent == "itinerary":
+        return {
+            "message": "Please use /generate-itinerary endpoint for full plan."
+        }
+
+    # 🔹 Default chat
     if session_id not in chat_memory:
         chat_memory[session_id] = []
 
     history = chat_memory[session_id]
 
-    # Add user message
-    history.append({
-        "role": "user",
-        "content": message
-    })
-
-    # Trim BEFORE sending
+    history.append({"role": "user", "content": message})
     history = trim_memory(history)
-
-    # 🔍 DEBUG PRINT (important for testing)
-    print("\n========= MEMORY BEFORE AI =========")
-    print(f"Total Messages: {len(history)}")
-    for i, msg in enumerate(history):
-        print(f"{i+1}. {msg}")
-    print("====================================\n")
 
     response = client.chat.completions.create(
         model=settings.GROQ_MODEL,
@@ -84,23 +82,9 @@ def chat_with_ai(session_id: str, message: str):
 
     reply = response.choices[0].message.content
 
-    # Add AI response
-    history.append({
-        "role": "assistant",
-        "content": reply
-    })
-
-    # Trim AFTER response
+    history.append({"role": "assistant", "content": reply})
     history = trim_memory(history)
 
-    # Save back
     chat_memory[session_id] = history
 
-    # 🔍 DEBUG PRINT AFTER RESPONSE
-    print("\n========= MEMORY AFTER AI =========")
-    print(f"Total Messages: {len(history)}")
-    for i, msg in enumerate(history):
-        print(f"{i+1}. {msg}")
-    print("===================================\n")
-
-    return reply
+    return {"response": reply}
