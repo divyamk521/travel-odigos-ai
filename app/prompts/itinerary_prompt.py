@@ -1,4 +1,4 @@
-def build_itinerary_prompt(data):
+def build_itinerary_prompt(data, places):
     return f"""
 You are a professional travel planner AI.
 
@@ -11,11 +11,16 @@ User details:
 - Budget: {data.budget}
 - Preferences: {", ".join(data.preferences)}
 
-Rules:
-- Return ONLY valid JSON
-- No explanations, no extra text
-- Follow this structure exactly:
+Available places:
+{places}
 
+Rules:
+- You MUST use these places in the itinerary
+- Do NOT invent new place names
+- Return ONLY valid JSON
+- No explanations
+
+Format:
 {{
   "destination": "string",
   "total_days": number,

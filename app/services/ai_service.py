@@ -6,6 +6,7 @@ from app.models.schemas import TravelResponse
 from app.services.intent_service import detect_intent
 from app.services.places_service import get_places
 from app.services.budget_service import estimate_budget
+from app.services.entity_service import extract_entities
 
 client = Groq(api_key=settings.GROQ_API_KEY)
 
@@ -47,22 +48,36 @@ def generate_itinerary(data):
 
 
 def chat_with_ai(session_id: str, message: str):
-    # 🔥 Detect intent
+    # 🔥 Step 1: detect intent
     intent = detect_intent(message)
 
-    # 🔥 ROUTING LOGIC
+    # 🔥 Step 2: extract entities
+    entities = extract_entities(message)
+
+    destination = entities.get("destination") or "Goa"
+    days = entities.get("days") or 3
+    budget = entities.get("budget") or "medium"
+
+    # 🔥 Step 3: route based on intent
+
     if intent == "budget":
-        return estimate_budget("Goa", 3, "medium")
+        return estimate_budget(destination, days, budget)
 
     elif intent == "places":
-        return {"places": get_places("Goa")}
+        return {"places": get_places(destination)}
 
     elif intent == "itinerary":
-        return {
-            "message": "Please use /generate-itinerary endpoint for full plan."
-        }
+        data = type("obj", (object,), {
+            "source": "unknown",
+            "destination": destination,
+            "days": days,
+            "budget": budget,
+            "preferences": []
+        })()
 
-    # 🔹 Default chat
+        return generate_itinerary(data)
+
+    # 🔹 fallback chat
     if session_id not in chat_memory:
         chat_memory[session_id] = []
 
