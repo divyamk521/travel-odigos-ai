@@ -1,60 +1,64 @@
-# app/prompts/itinerary_prompt.py
-
-def build_itinerary_prompt(data, places):
+def build_itinerary_prompt(data, places, budget_info):
     """
-    Constructs the prompt for the LLM using real-time place data.
-    Handles both dictionary objects and simple strings safely.
+    Constructs the prompt for the LLM using real-time place data and budget intelligence.
+    Ensures the AI stays locked to the requested destination.
     """
     formatted_places = []
     
     for p in places:
-        # Check if the place is a dictionary (from Geoapify)
         if isinstance(p, dict):
-            name = p.get('name', 'Unknown Attraction')
-            cat = p.get('category', 'Tourist Spot')
+            name = p.get('name', 'Attraction')
+            cat = p.get('category', 'Sights')
             addr = p.get('address', 'Local area')
             formatted_places.append(f"- {name} ({cat}): {addr}")
-        # Check if the place is just a string (from Fallback/Search)
-        elif isinstance(p, str):
+        else:
             formatted_places.append(f"- {p}")
 
     places_list = "\n".join(formatted_places)
 
     return f"""
-You are an expert Luxury Travel Consultant. Your task is to create a highly engaging, logical, and descriptive travel itinerary.
+### MANDATORY INSTRUCTIONS ###
+- YOU ARE A LOCAL TRAVEL EXPERT FOR {data.destination.upper()}.
+- YOU MUST ONLY USE THE PLACES LISTED UNDER 'VERIFIED PLACES'.
+- DO NOT MENTION PARIS, LONDON, OR ANY OTHER CITY. 
+- IF THE DESTINATION IS {data.destination}, EVERY ACTIVITY MUST BE IN {data.destination}.
 
---- TRIP DETAILS ---
+--- TRIP CORE ---
 Destination: {data.destination}
 Duration: {data.days} Days
 Budget Level: {data.budget}
-Preferences: {", ".join(data.preferences) if data.preferences else "General Tourism"}
+User Preferences: {", ".join(data.preferences) if data.preferences else "General Sightseeing"}
 
---- REAL-TIME VERIFIED PLACES ---
+--- FINANCIAL DATA (MUST BE USED IN BUDGET ANALYSIS) ---
+Total Trip Cost: {budget_info['total_cost']} {budget_info['currency']}
+Average Hotel/Night: {budget_info['daily_hotel']} {budget_info['currency']}
+Daily Allowance (Food/Travel): {budget_info['daily_allowance']} {budget_info['currency']}
+
+--- VERIFIED PLACES FOR {data.destination} ---
 {places_list}
 
 --- WRITING RULES ---
-1. Use professional, welcoming English.
-2. The 'summary' should be an exciting 2-3 sentence intro welcoming the traveler.
-3. The 'description' for each day must explain the narrative flow (e.g., "Start your morning at X before taking a scenic walk to Y").
-4. The 'budget_analysis' should explain why this fits the {data.budget} budget level.
-5. NEVER repeat an activity across different days.
-6. Group activities geographically to minimize travel time.
-7. Each day should have 3-4 activities.
+1. Language: Professional, welcoming English.
+2. The 'summary' must be 2-3 sentences specifically about visiting {data.destination}.
+3. The 'budget_analysis' must explain how the {budget_info['total_cost']} {budget_info['currency']} covers the specific {data.days}-day stay.
+4. Each day must have 3-4 activities grouped geographically.
 
-Return ONLY a JSON object with this exact structure:
+--- OUTPUT FORMAT ---
+Return ONLY a valid JSON object. 
+
 {{
   "destination": "{data.destination}",
   "total_days": {data.days},
-  "summary": "English text...",
+  "summary": "...",
   "itinerary": [
     {{
-      "day": number,
+      "day": 1,
       "theme": "Theme Title",
-      "description": "Daily narrative...",
+      "description": "Narrative description of the day...",
       "activities": ["Activity 1", "Activity 2", "Activity 3"]
     }}
   ],
-  "estimated_budget": "{data.budget}",
-  "budget_analysis": "Detailed budget explanation..."
+  "estimated_budget": "{budget_info['total_cost']} {budget_info['currency']}",
+  "budget_analysis": "..."
 }}
 """

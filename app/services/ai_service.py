@@ -1,125 +1,117 @@
-# app/services/ai_service.py
+import json
 from groq import Groq
 from app.core.config import settings
 from app.prompts.itinerary_prompt import build_itinerary_prompt
-from app.utils.json_utils import extract_json
 from app.models.schemas import TravelResponse
-from app.services.intent_service import detect_intent
 from app.services.places_service import get_places
 from app.services.budget_service import estimate_budget
-from app.services.entity_service import extract_entities
 
 client = Groq(api_key=settings.GROQ_API_KEY)
-
 chat_memory = {}
 
-def trim_memory(history):
-    limit = settings.MEMORY_LIMIT
-    if len(history) > limit:
-        return history[-limit:]
-    return history
+def extract_json(text):
+    try:
+        # Finds the first { and last } to handle extra text from LLM
+        start = text.find('{')
+        end = text.rfind('}') + 1
+        if start != -1 and end != -1:
+            return json.loads(text[start:end])
+    except Exception as e:
+        print(f"JSON Extraction Error: {e}")
+    return None
+
+def get_entities_from_message(message: str):
+    """
+    Uses the LLM to dynamically extract destination, days, and budget 
+    from raw text. No more hardcoding!
+    """
+    system_prompt = """
+    Extract travel entities from the user message. 
+    Return ONLY JSON with keys: "destination", "days" (int), "budget" (budget/medium/luxury), "preferences" (list).
+    If a value is missing, use null.
+    """
+    try:
+        response = client.chat.completions.create(
+            model=settings.GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message}
+            ],
+            temperature=0
+        )
+        entities = extract_json(response.choices[0].message.content)
+        return entities
+    except:
+        return None
 
 def generate_itinerary(data):
-    # This now calls our Geoapify-powered service
+    """
+    The core engine. Takes dynamic data, fetches real API results, 
+    and returns a structured itinerary.
+    """
+    # 1. Fetch REAL-TIME data from your APIs based on user choice
+    print(f"🌐 Fetching real-time data for: {data.destination}")
     places = get_places(data.destination)
+    budget_info = estimate_budget(data.destination, data.days, data.budget)
+    
+    # 2. Safety Check: If APIs fail, we tell the user rather than hallucinating
+    if not places:
+        return {"error": f"I couldn't find real-time location data for '{data.destination}'. Please try a different city name."}
 
-    print("\n📍 REAL-TIME PLACES FETCHED:", places)
+    # 3. Build the prompt with dynamic data
+    prompt = build_itinerary_prompt(data, places, budget_info)
 
-    # If Geoapify and Fallback both fail to find 5 spots
-    if len(places) < 5:
-        return {
-            "error": f"I couldn't find enough verified attractions for {data.destination} right now."
-        }
+    try:
+        response = client.chat.completions.create(
+            model=settings.GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a JSON travel generator. Use ONLY the provided verified places."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1
+        )
 
-    # Pass the structured real-world data into your prompt builder
-    prompt = build_itinerary_prompt(data, places)
-
-    for attempt in range(3):
-        try:
-            response = client.chat.completions.create(
-                model=settings.GROQ_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are a professional travel planner. Return ONLY valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.6
-            )
-
-            content = response.choices[0].message.content
-            print(f"\n🔍 LLM ATTEMPT {attempt + 1} OUTPUT:\n", content)
-
-            parsed = extract_json(content)
-
-            if parsed:
-                # Validate against your Pydantic schema
-                validated = TravelResponse(**parsed)
-                return validated.model_dump()
-                
-        except Exception as e:
-            print(f"❌ Attempt {attempt + 1} failed: {e}")
-
-    return {
-        "error": "Failed to generate a valid itinerary after 3 attempts.",
-        "raw_output": content if 'content' in locals() else "No response"
-    }
+        return extract_json(response.choices[0].message.content)
+            
+    except Exception as e:
+        return {"error": f"AI Generation failed: {str(e)}"}
 
 def chat_with_ai(session_id: str, message: str):
-    # 1. Understand what the user wants
-    intent = detect_intent(message)
-    entities = extract_entities(message)
-
-    destination = entities.get("destination")
+    """
+    Main Chat Entry Point. 
+    Dynamically decides whether to plan a trip or just chat.
+    """
+    # 1. Ask the AI to identify the user's intent and entities
+    entities = get_entities_from_message(message)
     
-    # 2. If it's a planning task, we need a destination
-    if intent in ["itinerary", "places", "budget"] and not destination:
-        return {"response": "That sounds like a great plan! Which city or country are you thinking of visiting?"}
+    # 2. If the user provided a destination, trigger the Dynamic Engine
+    if entities and entities.get("destination"):
+        # Convert dict to an object that generate_itinerary expects
+        class DynamicData:
+            def __init__(self, e):
+                self.destination = e.get("destination")
+                self.days = e.get("days") or 3
+                self.budget = e.get("budget") or "medium"
+                self.preferences = e.get("preferences") or []
 
-    days = entities.get("days") or 3
-    budget = entities.get("budget") or "medium"
-
-    # 3. Route to specific services based on Intent
-    if intent == "budget":
-        return estimate_budget(destination, days, budget)
-
-    elif intent == "places":
-        real_places = get_places(destination)
-        return {
-            "destination": destination,
-            "places": real_places,
-            "message": f"Here are some top-rated spots in {destination} right now."
-        }
-
-    elif intent == "itinerary":
-        # Create a simple data object for generate_itinerary
-        class TravelData:
-            def __init__(self, d, dy, b):
-                self.destination = d
-                self.days = dy
-                self.budget = b
-                self.preferences = []
-        
-        data = TravelData(destination, days, budget)
+        data = DynamicData(entities)
         return generate_itinerary(data)
 
-    # 4. General Chat (Memory Management)
+    # 3. Fallback to general conversation if no trip intent is found
     if session_id not in chat_memory:
         chat_memory[session_id] = []
 
     history = chat_memory[session_id]
     history.append({"role": "user", "content": message})
-    history = trim_memory(history)
 
     response = client.chat.completions.create(
         model=settings.GROQ_MODEL,
         messages=[
-            {"role": "system", "content": "You are a helpful travel assistant. You have access to real-time data when users ask for plans."},
-            *history
-        ],
-        temperature=0.7
+            {"role": "system", "content": "You are a helpful travel assistant. Help the user pick a destination."},
+            *history[-5:]
+        ]
     )
 
     reply = response.choices[0].message.content
     history.append({"role": "assistant", "content": reply})
-    chat_memory[session_id] = trim_memory(history)
-
-    return {"response": reply}
+    return reply
