@@ -12,18 +12,15 @@ def get_places(destination: str):
     Fetches 10-15 REAL tourist attractions using Geoapify.
     Falls back to Groq if the API fails or returns no data.
     """
-    # 1. Get Coordinates first
     lat, lon = get_city_coordinates(destination)
     
     if lat is None or lon is None:
         return generate_fallback_places(destination)
 
-    # 2. Fetch Places from Geoapify
-    # Categories: sights, culture, monuments, parks
     url = "https://api.geoapify.com/v2/places"
     params = {
         "categories": "tourism.sights,entertainment.culture,leisure.park",
-        "filter": f"circle:{lon},{lat},15000",  # 15km radius
+        "filter": f"circle:{lon},{lat},15000",
         "bias": f"proximity:{lon},{lat}",
         "limit": 15,
         "apiKey": settings.GEOAPIFY_API_KEY
@@ -46,7 +43,6 @@ def get_places(destination: str):
                     "lon": props.get("lon")
                 })
 
-        # 3. Validation: If API found nothing, use Fallback
         if len(places) < 5:
             return generate_fallback_places(destination)
 
@@ -56,15 +52,15 @@ def get_places(destination: str):
         print(f"Places API Error: {e}")
         return generate_fallback_places(destination)
 
-
 def generate_fallback_places(destination: str):
     """
     Uses Groq to list famous places if the Real-Time API fails.
+    Ensures output is a list of dictionaries for consistency.
     """
     prompt = f"""
     List 10 famous tourist places in {destination}.
     Return ONLY a JSON object with a "places" key containing a list of strings.
-    Example: {{ "places": ["Eiffel Tower", "Louvre Museum"] }}
+    Example: {{ "places": ["Place 1", "Place 2"] }}
     """
 
     try:
@@ -75,10 +71,14 @@ def generate_fallback_places(destination: str):
             temperature=0.5
         )
         content = response.choices[0].message.content.strip()
-        # Cleaning Groq's output in case it adds markdown backticks
+        
         if content.startswith("```json"):
             content = content.replace("```json", "").replace("```", "").strip()
             
-        return json.loads(content).get("places", [])
-    except Exception:
+        raw_list = json.loads(content).get("places", [])
+        
+        # Convert strings to consistent dictionary format
+        return [{"name": p, "category": "Famous Landmark", "address": destination} for p in raw_list]
+    except Exception as e:
+        print(f"Fallback Error: {e}")
         return []
